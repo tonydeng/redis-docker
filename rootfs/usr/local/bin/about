@@ -1,0 +1,4 @@
+#!/bin/bash
+
+echo "* $(redis-server --version)"
+echo "* Alpine Linux $(cat /etc/alpine-release)"
