@@ -12,7 +12,11 @@
 /data     # Redis数据文件目录
 ```
 
+## 参数
 
+```
+PASSWORD  # Redis密码
+```
 
 ## 创建Docker容器
 
@@ -22,5 +26,6 @@ docker pull wolfdeng/redis
 docker run --name redis \    
     -p 6379:6379 \
     -v /opt/redis/data:/data \
+    -e PASSWORD=Passw0rd \
     -it -d wolfdeng/redis
 ```
