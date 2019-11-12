@@ -4,26 +4,26 @@
 [![Image Size](https://img.shields.io/imagelayers/image-size/wolfdeng/redis/latest.svg)](https://imagelayers.io/?images=wolfdeng/redis:latest)
 [![Image Layers](https://img.shields.io/imagelayers/layers/wolfdeng/redis/latest.svg)](https://imagelayers.io/?images=wolfdeng/redis:latest)
 
-基于Alpine系统的Docker镜像，用于提供Redis(4.0.6)服务。
+基于Alpine系统的Docker镜像，用于提供Redis(5.0.6)服务。
 
 ## 目录
 
-```
+```bash
 /data     # Redis数据文件目录
 ```
 
 ## 参数
 
-```
+```bash
 PASSWORD  # Redis密码
 ```
 
 ## 创建Docker容器
 
-```
+```bash
 docker pull wolfdeng/redis
 
-docker run --name redis \    
+docker run --name redis \
     -p 6379:6379 \
     -v /opt/redis/data:/data \
     -e PASSWORD=Passw0rd \

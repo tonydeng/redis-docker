@@ -1,32 +1,91 @@
-FROM wolfdeng/alpine:3.7
+FROM wolfdeng/alpine:3.10
 
 MAINTAINER Tony Deng ( wolf.deng@gmail.com )
 
-EXPOSE 6379
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["redis-server", "/etc/redis.conf"]
+# add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
+RUN addgroup -S -g 1000 redis && adduser -S -G redis -u 999 redis
+
+ENV REDIS_VERSION=5.0.6
+ENV REDIS_DOWNLOAD_URL http://download.redis.io/releases/redis-5.0.6.tar.gz
+ENV REDIS_DOWNLOAD_SHA 6624841267e142c5d5d5be292d705f8fb6070677687c5aad1645421a936d22b3
+
+RUN set -eux; \
+	\
+	apk add --no-cache --virtual .build-deps \
+    # 'su-exec>=0.2' \
+    su-exec \
+    tzdata \
+		coreutils \
+		gcc \
+		linux-headers \
+		make \
+		musl-dev \
+	; \
+	\
+ # Download redis.tar.gz
+	wget -O redis.tar.gz "$REDIS_DOWNLOAD_URL"; \
+	echo "$REDIS_DOWNLOAD_SHA *redis.tar.gz" | sha256sum -c -; \
+	mkdir -p /usr/src/redis; \
+	tar -xzf redis.tar.gz -C /usr/src/redis --strip-components=1; \
+	rm redis.tar.gz; \
+	\
+# Config and Build Redis
+# disable Redis protected mode [1] as it is unnecessary in context of Docker
+# (ports are not automatically exposed when running inside Docker, but rather explicitly by specifying -p / -P)
+# [1]: https://github.com/antirez/redis/commit/edd4d555df57dc84265fdfb4ef59a4678832f6da
+	grep -q '^#define CONFIG_DEFAULT_PROTECTED_MODE 1$' /usr/src/redis/src/server.h; \
+	sed -ri 's!^(#define CONFIG_DEFAULT_PROTECTED_MODE) 1$!\1 0!' /usr/src/redis/src/server.h; \
+	grep -q '^#define CONFIG_DEFAULT_PROTECTED_MODE 0$' /usr/src/redis/src/server.h; \
+# for future reference, we modify this directly in the source instead of just supplying a default configuration flag because apparently "if you specify any argument to redis-server, [it assumes] you are going to specify everything"
+# see also https://github.com/docker-library/redis/issues/4#issuecomment-50780840
+# (more exactly, this makes sure the default behavior of "save on SIGTERM" stays functional by default)
+	\
+	make -C /usr/src/redis -j "$(nproc)"; \
+	make -C /usr/src/redis install; \
+	\
+# TODO https://github.com/antirez/redis/pull/3494 (deduplicate "redis-server" copies)
+	serverMd5="$(md5sum /usr/local/bin/redis-server | cut -d' ' -f1)"; export serverMd5; \
+	find /usr/local/bin/redis* -maxdepth 0 \
+		-type f -not -name redis-server \
+		-exec sh -eux -c ' \
+			md5="$(md5sum "$1" | cut -d" " -f1)"; \
+			test "$md5" = "$serverMd5"; \
+		' -- '{}' ';' \
+		-exec ln -svfT 'redis-server' '{}' ';' \
+	; \
+	\
+	rm -r /usr/src/redis; \
+	\
+	runDeps="$( \
+		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local \
+			| tr ',' '\n' \
+			| sort -u \
+			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
+	)"; \
+	apk add --no-network --virtual .redis-rundeps $runDeps; \
+  # Clean temp files
+	apk del --no-network .build-deps; \
+	\
+	redis-cli --version; \
+	redis-server --version 
+
+
+
+RUN mkdir /data && chown redis:redis /data
+
+COPY entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
 VOLUME ["/data"]
 WORKDIR /data
 
-COPY rootfs /
+EXPOSE 6379
+CMD ["redis-server"]
 
-ENV REDIS_VERSION=4.0.6
+# EXPOSE 6379
+# ENTRYPOINT ["/entrypoint.sh"]
+# CMD ["redis-server", "/etc/redis.conf"]
+# VOLUME ["/data"]
+# WORKDIR /data
 
-RUN set -exo pipefail \
-  && apk add --no-cache --virtual .build-deps \
-    build-base \
-    linux-headers \
-    openssl \
-  && wget -O /usr/local/bin/gosu https://github.com/tianon/gosu/releases/download/1.10/gosu-amd64 \
-  && chmod +x /usr/local/bin/gosu \
-  && cd /tmp \
-  && wget https://github.com/antirez/redis/archive/${REDIS_VERSION}.tar.gz \
-  && tar xzf ${REDIS_VERSION}.tar.gz \
-  && cd /tmp/redis-${REDIS_VERSION} \
-  && make \
-  && make install \
-  && cp redis.conf /etc/redis.conf \
-  && sed -i -e 's/bind 127.0.0.1/bind 0.0.0.0/' /etc/redis.conf \
-  && adduser -D redis \
-  && apk del .build-deps \
-  && rm -rf /tmp/*
+# COPY rootfs /
